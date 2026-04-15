@@ -1,0 +1,4 @@
+.env
+world/
+state.json
+server.jar
