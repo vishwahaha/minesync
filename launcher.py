@@ -7,8 +7,50 @@ import os
 import zipfile
 import hashlib
 
+def load_env(path=".env"):
+    env = {}
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    env[k.strip()] = v.strip()
+    return env
+
+ENV = load_env()
+BUCKET = ENV.get("BUCKET_NAME", "")
+if not BUCKET:
+    print("ERROR: BUCKET_NAME not set in .env")
+    sys.exit(1)
+
+import glob
+
+def find_java():
+    """Find the newest Java installation, bypassing PATH order issues."""
+    # Check known install directories for Microsoft/Adoptium/Oracle JDKs
+    search_dirs = [
+        os.path.join(os.environ.get("ProgramFiles", ""), "Microsoft"),
+        os.path.join(os.environ.get("ProgramFiles", ""), "Eclipse Adoptium"),
+        os.path.join(os.environ.get("ProgramFiles", ""), "Java"),
+    ]
+    candidates = []
+    for base in search_dirs:
+        if not os.path.isdir(base):
+            continue
+        for entry in os.listdir(base):
+            java_exe = os.path.join(base, entry, "bin", "java.exe")
+            if os.path.isfile(java_exe):
+                # Extract version number from folder name (e.g. "jdk-25.0.2.10-hotspot")
+                nums = [int(x) for x in entry.replace("-", ".").split(".") if x.isdigit()]
+                candidates.append((tuple(nums), java_exe))
+    if candidates:
+        candidates.sort(reverse=True)
+        return candidates[0][1]
+    # Fallback to PATH
+    return "java"
+
 def get_id():
-    # Time: O(1), Space: O(1)
     os_name = platform.system()
     if os_name == "Windows":
         c = 'powershell.exe "(Get-ItemProperty -Path \'HKLM:\\SOFTWARE\\Microsoft\\Cryptography\').MachineGuid"'
@@ -16,34 +58,44 @@ def get_id():
     elif os_name == "Linux":
         with open("/etc/machine-id", "r") as f:
             return f.read().strip()
-    elif os_name == "Darwin":
-        c = "ioreg -rd1 -c IOPlatformExpertDevice | awk '/IOPlatformUUID/ { split($0, line, \"\\\"\"); printf(\"%s\\n\", line[4]); }'"
-        return subprocess.check_output(c, shell=True).decode().strip()
     return ""
 
 def get_ip():
-    # Time: O(1), Space: O(1)
-    try:
-        return subprocess.check_output(["tailscale", "ip", "-4"]).decode().strip()
-    except:
-        return ""
+    # Try 'tailscale' from PATH first, then fall back to default Windows install path
+    tailscale_paths = [
+        "tailscale",
+        os.path.join(os.environ.get("ProgramFiles", ""), "Tailscale", "tailscale.exe"),
+    ]
+    for ts_path in tailscale_paths:
+        try:
+            ip = subprocess.check_output([ts_path, "ip", "-4"], stderr=subprocess.DEVNULL).decode().strip()
+            if ip:
+                return ip
+        except FileNotFoundError:
+            continue
+        except subprocess.CalledProcessError:
+            print("WARNING: Tailscale is not running or not logged in.")
+            print("  Open Tailscale and sign in to your tailnet.")
+            return ""
+        except Exception:
+            continue
+    print("WARNING: Tailscale is not installed. Players outside your LAN won't be able to connect.")
+    print("  Run setup.bat to install it.")
+    return ""
 
 def sync(s, d):
-    # Time: O(N) where N is num files, Space: O(1)
     r = subprocess.run(["rclone", "sync", s, d])
     if r.returncode != 0:
         print("Sync incomplete/failed. Run script again to resume.")
         sys.exit(1)
 
 def pull():
-    # Time: O(N), Space: O(1)
-    sync("b2_mc:mc_bucket/world", "./world")
+    sync(f"b2_mc:{BUCKET}/minecraft-world", "./minecraft-world")
 
 def push():
-    # Time: O(N), Space: O(1)
-    sync("./world", "b2_mc:mc_bucket/world")
+    sync("./minecraft-world", f"b2_mc:{BUCKET}/minecraft-world")
 
-def get_server_version(jar_path="server.jar"):
+def get_server_version(jar_path="minecraft-world/server.jar"):
     if not os.path.exists(jar_path):
         return "0.0.0"
     
@@ -73,16 +125,14 @@ def parse_version(ver_str):
     return str(ver_str)
 
 def chk_lock():
-    # Time: O(1) network call, Space: O(1)
     try:
-        subprocess.run(["rclone", "copy", "b2_mc:mc_bucket/state.json", "./"], check=True, capture_output=True)
+        subprocess.run(["rclone", "copy", f"b2_mc:{BUCKET}/state.json", "./"], check=True, capture_output=True)
         with open("state.json", "r") as f:
             return json.load(f)
     except:
         return None
 
 def set_lock(uid, ip, version=None):
-    # Time: O(1) network call, Space: O(1)
     st = chk_lock() or {}
     st["id"] = uid
     st["ip"] = ip
@@ -92,7 +142,7 @@ def set_lock(uid, ip, version=None):
         
     with open("state.json", "w") as f:
         json.dump(st, f)
-    subprocess.run(["rclone", "copy", "state.json", "b2_mc:mc_bucket/"], check=True)
+    subprocess.run(["rclone", "copy", "state.json", f"b2_mc:{BUCKET}/"], check=True)
 
 def rm_lock():
     # Instead of deleting state.json (which clears the version memory), we just nullify the id and ip.
@@ -102,7 +152,7 @@ def rm_lock():
         st["ip"] = None
         with open("state.json", "w") as f:
             json.dump(st, f)
-        subprocess.run(["rclone", "copy", "state.json", "b2_mc:mc_bucket/"], check=True)
+        subprocess.run(["rclone", "copy", "state.json", f"b2_mc:{BUCKET}/"], check=True)
 
 def check_version_safety(st):
     local_ver = get_server_version()
@@ -127,7 +177,6 @@ def check_version_safety(st):
     return local_ver
 
 def main():
-    # Time: O(M) where M is server uptime, Space: O(1)
     uid = get_id()
     ip = get_ip()
     st = chk_lock()
@@ -152,8 +201,15 @@ def main():
         pull() # Halts natively if pull is interrupted
         
     print("Starting Server...")
-    c = ["java", "-Xmx4G", "-Xms4G", "-jar", "server.jar", "nogui"]
-    s = subprocess.run(c)
+    if ip:
+        print(f"Your Tailscale IP: {ip} — share this with your friends to connect!")
+    else:
+        print("No Tailscale IP detected. Players can only join via your local network.")
+    java_path = find_java()
+    print(f"Using Java: {java_path}")
+    os.makedirs("minecraft-world", exist_ok=True)
+    c = [java_path, "-Xmx4G", "-Xms4G", "-jar", "server.jar", "nogui"]
+    s = subprocess.run(c, cwd="minecraft-world")
     
     if s.returncode == 0:
         print("Server stopped. Pushing data...")
