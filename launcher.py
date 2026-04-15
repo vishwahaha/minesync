@@ -123,11 +123,35 @@ def sync(s, d):
         error("Sync incomplete/failed. Run script again to resume.")
         sys.exit(1)
 
-def pull():
-    sync(f"b2_mc:{BUCKET}/minecraft-world", "./minecraft-world")
-
 def push():
     sync("./minecraft-world", f"b2_mc:{BUCKET}/minecraft-world")
+
+def pull(cloud_ts):
+    if cloud_ts and cloud_ts <= get_loc_ts():
+        info("Local is up-to-date. Skipping pull.")
+        return
+
+    if not valid_cloud():
+        warn("Cloud missing server.jar (Empty/Invalid). Skipping pull.")
+        return
+
+    sync(f"b2_mc:{BUCKET}/minecraft-world", "./minecraft-world")
+
+def get_loc_ts():
+    f = "minecraft-world/logs/latest.log"
+    return int(os.path.getmtime(f)) if os.path.exists(f) else 0
+
+def valid_cloud():
+    req = {"server.jar", "world"} # Replace with dummy values
+    try:
+        r = subprocess.run(
+            ["rclone", "lsf", f"b2_mc:{BUCKET}/minecraft-world/"],
+            capture_output=True, text=True
+        )
+        cur = {x.strip('/').strip() for x in r.stdout.split('\n') if x}
+        return req.issubset(cur)
+    except:
+        return False
 
 # ── Version checking ────────────────────────────────────────────────
 def get_server_version(jar_path="minecraft-world/server.jar"):
@@ -250,7 +274,7 @@ def main():
     java_path = find_java()
     print(f"  {C.DIM}Using Java: {java_path}{C.RESET}")
     os.makedirs("minecraft-world", exist_ok=True)
-    c = [java_path, "-Xmx4G", "-Xms4G", "-jar", "server.jar", "nogui"]
+    c = [java_path, "-Xmx10G", "-Xms10G", "-jar", "server.jar", "nogui"]
     s = subprocess.run(c, cwd="minecraft-world")
     
     if s.returncode == 0:
