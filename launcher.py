@@ -264,7 +264,8 @@ def main():
         info("Acquiring lock...")
         set_lock(uid, ip, version=local_ver)
         info("Pulling data...")
-        pull() # Halts natively if pull is interrupted
+        cloud_ts = st.get("ts", 0) if st else 0
+        pull(cloud_ts) # Halts natively if pull is interrupted
         
     bold("Starting Server...")
     if ip:
