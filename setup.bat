@@ -87,18 +87,4 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo Configuring Windows Firewall for Minecraft (port 25565)...
-netsh advfirewall firewall show rule name="Minecraft Server" >nul 2>nul
-if %errorlevel% neq 0 (
-    netsh advfirewall firewall add rule name="Minecraft Server" dir=in action=allow protocol=TCP localport=25565
-    if %errorlevel% equ 0 (
-        echo Firewall rule added successfully.
-    ) else (
-        echo WARNING: Could not add firewall rule. Try running setup.bat as Administrator.
-    )
-) else (
-    echo Firewall rule already exists.
-)
-
-echo.
 echo Setup complete. Please restart your terminal before running launcher.py to ensure all new tools are in your PATH.
