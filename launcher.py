@@ -7,6 +7,40 @@ import os
 import zipfile
 import hashlib
 
+# ── ANSI color helpers ──────────────────────────────────────────────
+# Enable ANSI escape codes on Windows 10+
+if os.name == "nt":
+    os.system("")
+
+class C:
+    RED     = "\033[91m"
+    GREEN   = "\033[92m"
+    YELLOW  = "\033[93m"
+    BLUE    = "\033[94m"
+    CYAN    = "\033[96m"
+    BOLD    = "\033[1m"
+    DIM     = "\033[2m"
+    RESET   = "\033[0m"
+
+def info(msg):
+    print(f"{C.CYAN}ℹ {msg}{C.RESET}")
+
+def success(msg):
+    print(f"{C.GREEN}✔ {msg}{C.RESET}")
+
+def warn(msg):
+    print(f"{C.YELLOW}⚠ {msg}{C.RESET}")
+
+def error(msg):
+    print(f"{C.RED}✖ {msg}{C.RESET}")
+
+def bold(msg):
+    print(f"{C.BOLD}{msg}{C.RESET}")
+
+def highlight(msg):
+    print(f"{C.BOLD}{C.GREEN}{msg}{C.RESET}")
+
+# ── .env loader ─────────────────────────────────────────────────────
 def load_env(path=".env"):
     env = {}
     if os.path.exists(path):
@@ -21,14 +55,12 @@ def load_env(path=".env"):
 ENV = load_env()
 BUCKET = ENV.get("BUCKET_NAME", "")
 if not BUCKET:
-    print("ERROR: BUCKET_NAME not set in .env")
+    error("BUCKET_NAME not set in .env")
     sys.exit(1)
 
-import glob
-
+# ── Java finder ─────────────────────────────────────────────────────
 def find_java():
     """Find the newest Java installation, bypassing PATH order issues."""
-    # Check known install directories for Microsoft/Adoptium/Oracle JDKs
     search_dirs = [
         os.path.join(os.environ.get("ProgramFiles", ""), "Microsoft"),
         os.path.join(os.environ.get("ProgramFiles", ""), "Eclipse Adoptium"),
@@ -50,6 +82,7 @@ def find_java():
     # Fallback to PATH
     return "java"
 
+# ── Identity ────────────────────────────────────────────────────────
 def get_id():
     os_name = platform.system()
     if os_name == "Windows":
@@ -74,19 +107,20 @@ def get_ip():
         except FileNotFoundError:
             continue
         except subprocess.CalledProcessError:
-            print("WARNING: Tailscale is not running or not logged in.")
-            print("  Open Tailscale and sign in to your tailnet.")
+            warn("Tailscale is not running or not logged in.")
+            print(f"  {C.DIM}Open Tailscale and sign in to your tailnet.{C.RESET}")
             return ""
         except Exception:
             continue
-    print("WARNING: Tailscale is not installed. Players outside your LAN won't be able to connect.")
-    print("  Run setup.bat to install it.")
+    warn("Tailscale is not installed. Players outside your LAN won't be able to connect.")
+    print(f"  {C.DIM}Run setup.bat to install it.{C.RESET}")
     return ""
 
+# ── Cloud sync ──────────────────────────────────────────────────────
 def sync(s, d):
-    r = subprocess.run(["rclone", "sync", s, d])
+    r = subprocess.run(["rclone", "sync", s, d, "--progress"])
     if r.returncode != 0:
-        print("Sync incomplete/failed. Run script again to resume.")
+        error("Sync incomplete/failed. Run script again to resume.")
         sys.exit(1)
 
 def pull():
@@ -95,6 +129,7 @@ def pull():
 def push():
     sync("./minecraft-world", f"b2_mc:{BUCKET}/minecraft-world")
 
+# ── Version checking ────────────────────────────────────────────────
 def get_server_version(jar_path="minecraft-world/server.jar"):
     if not os.path.exists(jar_path):
         return "0.0.0"
@@ -124,6 +159,7 @@ def parse_version(ver_str):
         return tuple(int(p) for p in parts)
     return str(ver_str)
 
+# ── Lock management ─────────────────────────────────────────────────
 def chk_lock():
     try:
         subprocess.run(["rclone", "copy", f"b2_mc:{BUCKET}/state.json", "./"], check=True, capture_output=True)
@@ -165,17 +201,18 @@ def check_version_safety(st):
         # If both are semantic versions
         if isinstance(cur_parsed, tuple) and isinstance(last_parsed, tuple):
             if cur_parsed < last_parsed:
-                print(f"ERROR: Server downgrade detected! Local {local_ver} < Last {last_version}.")
-                print("Downgrading risks severe world corruption. Please upgrade your server.jar.")
+                error(f"Server downgrade detected! Local {local_ver} < Last {last_version}.")
+                error("Downgrading risks severe world corruption. Please upgrade your server.jar.")
                 sys.exit(1)
         # If hash fallback, require strict equality
         else:
             if cur_parsed != last_parsed:
-                print(f"ERROR: Server JAR mismatch detected! Local does not match last active version.")
-                print("Using mismatched servers can corrupt chunks. Update your server.jar.")
+                error("Server JAR mismatch detected! Local does not match last active version.")
+                error("Using mismatched servers can corrupt chunks. Update your server.jar.")
                 sys.exit(1)
     return local_ver
 
+# ── Main ────────────────────────────────────────────────────────────
 def main():
     uid = get_id()
     ip = get_ip()
@@ -185,42 +222,42 @@ def main():
     
     if is_locked:
         if st.get("id") == uid:
-            print("Smart lock bypass. Resuming...")
+            info("Smart lock bypass. Resuming...")
             # We still need to check version safety before resuming
             local_ver = check_version_safety(st)
         else:
-            print(f"Locked by IP: {st.get('ip')}")
+            error(f"Server is locked by another host — IP: {C.BOLD}{st.get('ip')}{C.RESET}{C.RED}")
             sys.exit(0)
     else:
         # Check version safety before we pull, saving time
         local_ver = check_version_safety(st)
         
-        print("Acquiring lock...")
+        info("Acquiring lock...")
         set_lock(uid, ip, version=local_ver)
-        print("Pulling data...")
+        info("Pulling data...")
         pull() # Halts natively if pull is interrupted
         
-    print("Starting Server...")
+    bold("Starting Server...")
     if ip:
-        print(f"Your Tailscale IP: {ip} — share this with your friends to connect!")
+        highlight(f"  ▸ Connect via Tailscale IP: {ip}")
     else:
-        print("No Tailscale IP detected. Players can only join via your local network.")
+        warn("No Tailscale IP detected. Players can only join via your local network.")
     java_path = find_java()
-    print(f"Using Java: {java_path}")
+    print(f"  {C.DIM}Using Java: {java_path}{C.RESET}")
     os.makedirs("minecraft-world", exist_ok=True)
     c = [java_path, "-Xmx4G", "-Xms4G", "-jar", "server.jar", "nogui"]
     s = subprocess.run(c, cwd="minecraft-world")
     
     if s.returncode == 0:
-        print("Server stopped. Pushing data...")
+        info("Server stopped. Pushing data...")
         push() # Halts natively if push is interrupted
-        print("Removing lock...")
+        info("Removing lock...")
         rm_lock()
-        print("Done.")
+        success("Done. World saved and lock released.")
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--force-unlock":
         rm_lock()
-        print("Unlocked.")
+        success("Unlocked.")
     else:
         main()
