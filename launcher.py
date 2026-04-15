@@ -165,7 +165,12 @@ def chk_lock():
         subprocess.run(["rclone", "copy", f"b2_mc:{BUCKET}/state.json", "./"], check=True, capture_output=True)
         with open("state.json", "r") as f:
             return json.load(f)
-    except:
+    except FileNotFoundError:
+        # rclone is missing from the system
+        error("rclone not found. Please install it and add to PATH.")
+        sys.exit(1)
+    except Exception:
+        # state.json missing or bucket error
         return None
 
 def set_lock(uid, ip, version=None):
