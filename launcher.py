@@ -118,7 +118,7 @@ def get_ip():
 
 # ── Cloud sync ──────────────────────────────────────────────────────
 def sync(s, d):
-    r = subprocess.run(["rclone", "sync", s, d, "--progress"])
+    r = subprocess.run(["rclone", "sync", s, d, "--progress", "--b2-hard-delete"])
     if r.returncode != 0:
         error("Sync incomplete/failed. Run script again to resume.")
         sys.exit(1)
