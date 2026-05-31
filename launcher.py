@@ -142,7 +142,7 @@ def get_loc_ts():
     return int(os.path.getmtime(f)) if os.path.exists(f) else 0
 
 def valid_cloud():
-    req = {"server.jar", "world"} # Replace with dummy values
+    req = {"fabric-server-launch.jar", "world"} # Replace with dummy values
     try:
         r = subprocess.run(
             ["rclone", "lsf", f"b2_mc:{BUCKET}/minecraft-world/"],
@@ -154,7 +154,7 @@ def valid_cloud():
         return False
 
 # ── Version checking ────────────────────────────────────────────────
-def get_server_version(jar_path="minecraft-world/server.jar"):
+def get_server_version(jar_path="minecraft-world/fabric-server-launch.jar"):
     if not os.path.exists(jar_path):
         return "0.0.0"
     
@@ -275,7 +275,7 @@ def main():
     java_path = find_java()
     print(f"  {C.DIM}Using Java: {java_path}{C.RESET}")
     os.makedirs("minecraft-world", exist_ok=True)
-    c = [java_path, "-Xmx10G", "-Xms10G", "-jar", "server.jar", "nogui"]
+    c = [java_path, "-Xmx10G", "-Xms10G", "-jar", "fabric-server-launch.jar", "nogui"]
     s = subprocess.run(c, cwd="minecraft-world")
     
     if s.returncode == 0:
